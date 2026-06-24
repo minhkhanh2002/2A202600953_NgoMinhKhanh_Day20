@@ -31,12 +31,14 @@ _Triển khai trên Windows bằng Python 3.10 venv để tương thích bánh x
 
 | Model | Load (ms) | TTFT P50/P95 (ms) | TPOT P50/P95 (ms) | E2E P50/P95/P99 (ms) | Decode rate (tok/s) |
 |---|---:|---:|---:|---:|---:|
-| Llama-3.2-3B-Instruct-Q4_K_M.gguf | 1997 | 262 / 430 | 91.1 / 149.7 | 6017 / 9831 / 10322 | 11.0 |
-| Llama-3.2-3B-Instruct-Q3_K_L.gguf | 1261 | 363 / 450 | 77.4 / 95.8 | 5243 / 6362 / 6460 | 12.9 |
+| Llama-3.2-3B-Instruct-Q4_K_M.gguf | 4613 | 405 / 629 | 116.0 / 122.4 | 7705 / 7924 / 8015 | 8.6 |
+| Llama-3.2-3B-Instruct-Q2_K.gguf | 2540 | 542 / 584 | 78.3 / 89.6 | 5376 / 5936 / 5941 | 12.8 |
+
+> Đo qua native `llama-server` streaming `/v1/chat/completions` (Python `llama-cpp` wheel hỏng trên máy này); cả 2 model đo cùng phương pháp nên so sánh công bằng. Q2_K tải từ `unsloth/Llama-3.2-3B-Instruct-GGUF` (bartowski không có Q2_K cho tier 3B).
 
 **Một quan sát** (≤ 50 chữ): Q4_K_M vs Q2_K trên máy bạn — số liệu nói gì? Quality đáng đánh đổi không?
 
-_Lưu ý: tôi dùng Q3_K_L làm quant so sánh (thay cho Q2_K) vì bartowski repo không kèm Q2_K cho tier 3B và Q3_K_L cho cùng góc nhìn size↔latency. Q3_K_L giải mã nhanh hơn ~17% (12.9 vs 11.0 tok/s) và load nhanh hơn, nhưng Q4_K_M cho chất lượng câu trả lời tốt hơn rõ. Trừ khi RAM cực kỳ thiếu, Q4_K_M là lựa chọn tối ưu hơn._
+_Q2_K giải mã nhanh hơn ~49% (12.8 vs 8.6 tok/s), load nhanh gần gấp đôi và RAM nhỏ hơn (~1.4GB vs ~2GB) — nhưng nén mạnh nên chất lượng/độ mạch lạc giảm rõ. TTFT của Q2_K lại cao hơn chút (prefill ít hưởng lợi từ nén). Với máy 23GB RAM này, đánh đổi quality của Q2_K không đáng; Q4_K_M là sweet spot. Q2_K chỉ hợp khi RAM cực kỳ eo hẹp._
 
 ---
 
@@ -95,6 +97,8 @@ speedup: ~2.08× so với 1 thread; và +4% so với dùng cả 12 hyperthread
 _Decode trên CPU là bài toán **memory-bandwidth bound**, không phải compute bound: mỗi token sinh ra phải đọc lại toàn bộ trọng số model (~2 GB ở Q4_K_M) từ RAM. Khi tăng thread từ 1→6, mỗi core thêm vào đóng góp thêm băng thông đọc nên tok/s tăng gần tuyến tính (6.1→12.7). Nhưng máy có 6 physical core / 12 logical — hai hyperthread chia nhau cùng một bộ execution unit và cùng một memory channel, nên khi đẩy lên 12–24 thread chúng tranh nhau cùng bus bộ nhớ, gây cache contention và scheduling overhead → tok/s **giảm** (12.2 rồi 11.2)._
 
 _Đây đúng như mental model deck §3 mô tả: với workload bandwidth-bound, "more threads" không phải lúc nào cũng nhanh hơn — sweet spot nằm ở physical-core count. Mặc định nhiều khi để cao hơn, nên chỉ một flag `-t 6` đã lấy lại ~4% mà không đổi model hay phần cứng._
+
+**Bonus challenge đã thử — C2 (KV-cache quantization):** đo `f16` vs `q8_0` KV cache bằng `llama-bench` (chi tiết: [`bonus/C2-kv-cache-quant.md`](../bonus/C2-kv-cache-quant.md)). Kết quả: `q8_0` làm prefill chậm ~13% (56.9→49.6 t/s) còn decode không đổi (10.15→10.41 t/s, trong sai số). Bài học: KV-cache quant là knob về **capacity (RAM)** chứ không phải latency — chỉ đáng dùng khi KV memory là ràng buộc (long-context, nhiều slot, VRAM nhỏ), không phải trên CPU short-context như máy này.
 
 ---
 
