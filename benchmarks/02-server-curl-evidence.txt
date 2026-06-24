@@ -1,0 +1,12 @@
+$ curl -s http://127.0.0.1:8080/v1/chat/completions \
+    -H "Content-Type: application/json" \
+    -d '{"model":"local","messages":[{"role":"user","content":"Define TTFT in one sentence."}],"max_tokens":60}'
+
+POST http://127.0.0.1:8080/v1/chat/completions   ->  200 OK
+model: local | max_tokens: 60
+---
+assistant: I couldn't find any widely recognized definition for TTFT. Could you
+           provide more context or information about what TTFT stands for?
+---
+finish_reason: stop
+usage: prompt=42  completion=27  total=69

@@ -21,8 +21,8 @@ from pathlib import Path
 LLAMA_BENCH = Path("BONUS-llama-cpp-optimization/llama.cpp/build/bin/llama-bench")
 LLAMA_BENCH_EXE = LLAMA_BENCH.with_suffix(".exe")
 
-# llama-bench prints a markdown-ish table; this regex grabs the tg128 (decode) row.
-TG_RE = re.compile(r"\|\s*tg128\s*\|\s*([0-9.]+)\s*±")
+# llama-bench prints a markdown-ish table; this regex grabs the tg (decode) row.
+TG_RE = re.compile(r"\|\s*tg\d+\s*\|\s*([0-9.]+)")
 
 
 def find_bench() -> Path:
@@ -64,17 +64,22 @@ def run_one(bench: Path, model: str, threads: int, n_gpu_layers: int) -> float:
     out = subprocess.run(cmd, capture_output=True, text=True, check=False).stdout
     m = TG_RE.search(out)
     if not m:
-        # Fall back: scan for any decimal followed by t/s
-        m = re.search(r"([0-9.]+)\s*tokens/s", out)
+        # Fall back: scan for any tg64/tg128 and get the decimal
+        m = re.search(r"tg\d+\s*\|\s*([0-9.]+)", out)
     return float(m.group(1)) if m else 0.0
 
 
 def main() -> int:
+    import os
     bench = find_bench()
     model = load_active()
     hw = load_hw()
     backends = hw.get("gpu", {}).get("backends", {})
-    n_gpu = 99 if any(v for k, v in backends.items() if k != "cpu_only") else 0
+    env_ngl = os.environ.get("LAB_N_GPU_LAYERS")
+    if env_ngl is not None:
+        n_gpu = int(env_ngl)
+    else:
+        n_gpu = 99 if any(v for k, v in backends.items() if k != "cpu_only") else 0
 
     grid = thread_grid(hw)
     print(f"==> thread sweep on {Path(model).name}")
@@ -93,8 +98,8 @@ def main() -> int:
     out_dir.mkdir(exist_ok=True)
 
     best = max(rows, key=lambda r: r["tok_s"]) if rows else {"threads": 0, "tok_s": 0}
-    md = "# Bonus — Thread sweep\n\n"
-    md += f"Model: `{Path(model).name}`  ·  GPU layers: `{n_gpu}`\n\n"
+    md = "# Bonus - Thread sweep\n\n"
+    md += f"Model: `{Path(model).name}` | GPU layers: `{n_gpu}`\n\n"
     md += "| threads | tg128 (tok/s) |\n|---:|---:|\n"
     md += "\n".join(f"| {r['threads']} | {r['tok_s']:.1f} |" for r in rows)
     md += f"\n\n**Best**: `-t {best['threads']}` at {best['tok_s']:.1f} tok/s.\n\n"
@@ -103,8 +108,8 @@ def main() -> int:
         "drops as you go higher, that's the memory-bandwidth ceiling: extra threads "
         "fight over the same memory channels and slow each other down.\n"
     )
-    (out_dir / "bonus-thread-sweep.md").write_text(md)
-    (out_dir / "bonus-thread-sweep.json").write_text(json.dumps(rows, indent=2))
+    (out_dir / "bonus-thread-sweep.md").write_text(md, encoding="utf-8")
+    (out_dir / "bonus-thread-sweep.json").write_text(json.dumps(rows, indent=2), encoding="utf-8")
 
     print("\n" + md)
     return 0
